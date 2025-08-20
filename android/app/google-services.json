@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "375277400045",
+    "firebase_url": "https://flutterwebrtc-ac02f-default-rtdb.firebaseio.com",
+    "project_id": "flutterwebrtc-ac02f",
+    "storage_bucket": "flutterwebrtc-ac02f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:375277400045:android:d4cece3025f11bf30781e4",
+        "android_client_info": {
+          "package_name": "com.example.my_webrtc_videocall"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCidtRik7EqsmlW7laX97_w9GSbShVKPGQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:375277400045:android:2318aefdc45bcca80781e4",
+        "android_client_info": {
+          "package_name": "com.flutterwebrtc"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCidtRik7EqsmlW7laX97_w9GSbShVKPGQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
