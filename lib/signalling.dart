@@ -1,12 +1,19 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'dart:html' as html;
+
 class Signaling {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  // final FirebaseStorage _storage = FirebaseStorage.instance;
   RTCPeerConnection? peerConnection;
   MediaStream? localStream;
   MediaStream? remoteStream;
   RTCVideoRenderer? _remoteRenderer;
+
+  String? _currentRoomId;
 
   Function(MediaStream stream)? onAddRemoteStream;
 
@@ -14,7 +21,10 @@ class Signaling {
   final List<RTCIceCandidate> _pendingCandidates = [];
 
   // ** Open user media (camera + mic) and bind to localRenderer
-  Future<void> openUserMedia(RTCVideoRenderer localRenderer, RTCVideoRenderer remoteRenderer) async {
+  Future<void> openUserMedia(
+    RTCVideoRenderer localRenderer,
+    RTCVideoRenderer remoteRenderer,
+  ) async {
     final stream = await navigator.mediaDevices.getUserMedia({
       'video': true,
       'audio': true,
@@ -38,7 +48,10 @@ class Signaling {
   }
 
   /// Create a new room (caller)
-  Future<String?> createRoom(RTCVideoRenderer remoteRenderer) async {
+  Future<String?> createRoom(
+    RTCVideoRenderer remoteRenderer, {
+    bool requestImage = false,
+  }) async {
     _remoteRenderer = remoteRenderer;
     DocumentReference roomRef = _firestore.collection('rooms').doc();
 
@@ -83,6 +96,11 @@ class Signaling {
       roomRef.collection('callerCandidates').add(candidate.toMap());
     };
 
+    await roomRef.collection('images').add({
+      'createdAt': FieldValue.serverTimestamp(),
+      'fileUrl': null,
+    });
+
     // Create offer
     RTCSessionDescription offer = await peerConnection!.createOffer();
     await peerConnection!.setLocalDescription(offer);
@@ -123,7 +141,7 @@ class Signaling {
         }
       }
     });
-
+    _currentRoomId = roomRef.id;
     return roomRef.id;
   }
 
@@ -230,7 +248,8 @@ class Signaling {
   Future<void> _safelyAddCandidate(RTCIceCandidate candidate) async {
     if (peerConnection != null &&
         _isRemoteDescriptionSet &&
-        peerConnection!.signalingState != RTCSignalingState.RTCSignalingStateClosed) {
+        peerConnection!.signalingState !=
+            RTCSignalingState.RTCSignalingStateClosed) {
       try {
         await peerConnection!.addCandidate(candidate);
         print('✅ Added ICE candidate immediately');
@@ -272,24 +291,209 @@ class Signaling {
       // Dispose streams
       await localStream?.dispose();
       await remoteStream?.dispose();
-      
+
       // Clear renderers
       localRenderer.srcObject = null;
       _remoteRenderer?.srcObject = null;
 
       // Close peer connection
       await peerConnection?.close();
-      
+
       // Reset state
       peerConnection = null;
       localStream = null;
       remoteStream = null;
       _isRemoteDescriptionSet = false;
       _pendingCandidates.clear();
-      
+
       print("📴 Call ended and cleaned up");
     } catch (e) {
       print("❌ Error during hangup: $e");
     }
+  }
+
+  Future<String?> takeCustomerPicture() async {
+    try {
+      if (_remoteRenderer == null || _remoteRenderer!.srcObject == null) {
+        print('❌ No remote video stream available');
+        throw Exception('No remote video stream available for capture');
+      }
+
+      if (_currentRoomId == null) {
+        print('❌ No room ID available');
+        throw Exception('No room ID available - must be in a call to capture images');
+      }
+
+      final videoTrack = _remoteRenderer!.srcObject!.getVideoTracks().first;
+      final frameBuffer = await videoTrack.captureFrame();
+      final imgBytes = frameBuffer.asUint8List();
+
+      // Convert to base64 for Firestore storage
+      final base64String = base64Encode(imgBytes);
+      
+      // Generate unique image ID with timestamp
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final imageId = 'customer_${timestamp}';
+      
+      print('📸 Captured ${imgBytes.length} bytes for room $_currentRoomId');
+      
+      // Store in room's images subcollection
+      final roomRef = _firestore.collection('rooms').doc(_currentRoomId);
+      final imageDocRef = await roomRef.collection('images').add({
+        'image_id': imageId,
+        'image_data': base64String,
+        'content_type': 'image/png',
+        'file_size': imgBytes.length,
+        'captured_at': FieldValue.serverTimestamp(),
+        'local_timestamp': timestamp,
+        'capture_type': 'remote_user_snapshot',
+        'room_id': _currentRoomId,
+        'captured_by': 'local_user', // You can customize this
+      });
+      
+      print('✅ Customer picture saved to room $_currentRoomId');
+      print('📍 Image Document ID: ${imageDocRef.id}');
+      
+      return imageDocRef.id; // Return image document ID
+      
+    } catch (e) {
+      print('❌ Error capturing and storing picture: $e');
+      rethrow;
+    }
+  }
+
+  Future<String?> getImageDataUrl(String imageDocumentId) async {
+    try {
+      if (_currentRoomId == null) {
+        print('❌ No room ID available');
+        return null;
+      }
+
+      final roomRef = _firestore.collection('rooms').doc(_currentRoomId);
+      final doc = await roomRef.collection('images').doc(imageDocumentId).get();
+      
+      if (!doc.exists) {
+        print('❌ Image document not found: $imageDocumentId');
+        return null;
+      }
+      
+      final data = doc.data() as Map<String, dynamic>;
+      final base64String = data['image_data'] as String;
+      final contentType = data['content_type'] as String? ?? 'image/png';
+      
+      return 'data:$contentType;base64,$base64String';
+      
+    } catch (e) {
+      print('❌ Error retrieving image: $e');
+      return null;
+    }
+  }
+
+  /// Get image for any room (static method)
+  Future<String?> getImageDataUrlForRoom(String roomId, String imageDocumentId) async {
+    try {
+      final roomRef = _firestore.collection('rooms').doc(roomId);
+      final doc = await roomRef.collection('images').doc(imageDocumentId).get();
+      
+      if (!doc.exists) {
+        print('❌ Image document not found: $imageDocumentId in room $roomId');
+        return null;
+      }
+      
+      final data = doc.data() as Map<String, dynamic>;
+      final base64String = data['image_data'] as String;
+      final contentType = data['content_type'] as String? ?? 'image/png';
+      
+      return 'data:$contentType;base64,$base64String';
+      
+    } catch (e) {
+      print('❌ Error retrieving image: $e');
+      return null;
+    }
+  }
+
+  /// View image in new browser tab
+  Future<void> viewImageInNewTab(String imageDocumentId) async {
+    try {
+      final dataUrl = await getImageDataUrl(imageDocumentId);
+      if (dataUrl != null) {
+        html.window.open(dataUrl, '_blank');
+        print('✅ Image opened in new tab');
+      } else {
+        print('❌ Could not get image data for viewing');
+      }
+    } catch (e) {
+      print('❌ Error opening image: $e');
+    }
+  }
+
+  /// Download image to user's computer
+  Future<void> downloadRoomImage(String imageDocumentId) async {
+    try {
+      final dataUrl = await getImageDataUrl(imageDocumentId);
+      if (dataUrl == null) {
+        print('❌ Could not get image data');
+        return;
+      }
+      
+      if (_currentRoomId == null) return;
+      
+      final roomRef = _firestore.collection('rooms').doc(_currentRoomId);
+      final doc = await roomRef.collection('images').doc(imageDocumentId).get();
+      final data = doc.data() as Map<String, dynamic>;
+      final imageId = data['image_id'] as String;
+      final timestamp = data['local_timestamp'] as int;
+      final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      
+      // Create descriptive filename
+      final fileName = '${imageId}_${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}_room-${_currentRoomId}.png';
+      
+      // Create download link
+      final anchor = html.AnchorElement(href: dataUrl)
+        ..setAttribute('download', fileName)
+        ..style.display = 'none';
+      
+      html.document.body?.children.add(anchor);
+      anchor.click();
+      html.document.body?.children.remove(anchor);
+      
+      print('✅ Image downloaded: $fileName');
+      
+    } catch (e) {
+      print('❌ Error downloading image: $e');
+    }
+  }
+
+  /// Get all images for the current room
+  Future<List<Map<String, dynamic>>> getRoomImages() async {
+    try {
+      if (_currentRoomId == null) {
+        print('❌ No room ID available');
+        return [];
+      }
+
+      final roomRef = _firestore.collection('rooms').doc(_currentRoomId);
+      final querySnapshot = await roomRef
+          .collection('images')
+          .where('image_data', isNotEqualTo: null) // Only get actual images
+          .orderBy('captured_at', descending: true)
+          .get();
+      
+      return querySnapshot.docs.map((doc) => {
+        'document_id': doc.id,
+        'room_id': _currentRoomId,
+        ...doc.data(),
+        // Don't include image_data in list to save bandwidth
+      }..remove('image_data')).toList();
+      
+    } catch (e) {
+      print('❌ Error fetching room images: $e');
+      return [];
+    }
+  }
+
+  /// Get current room ID
+  String? getCurrentRoomId() {
+    return _currentRoomId;
   }
 }

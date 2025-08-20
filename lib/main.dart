@@ -135,6 +135,150 @@ class _MyHomePageState extends State<MyHomePage> {
     super.dispose();
   }
 
+  void _showImagePreview(
+    BuildContext context,
+    String documentId,
+    String imageId,
+  ) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => Dialog(
+            child: Container(
+              width: MediaQuery.of(context).size.width * 0.7,
+              height: MediaQuery.of(context).size.height * 0.7,
+              child: Column(
+                children: [
+                  // Header
+                  Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      border: Border(
+                        bottom: BorderSide(color: Colors.grey[300]!),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            imageId,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Image Display
+                  Expanded(
+                    child: Container(
+                      padding: EdgeInsets.all(16),
+                      child: FutureBuilder<String?>(
+                        future: signaling.getImageDataUrl(documentId),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return Center(child: CircularProgressIndicator());
+                          } else if (snapshot.hasData &&
+                              snapshot.data != null) {
+                            return InteractiveViewer(
+                              panEnabled: true,
+                              boundaryMargin: EdgeInsets.all(100),
+                              minScale: 0.5,
+                              maxScale: 4,
+                              child: Image.network(
+                                snapshot.data!,
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.broken_image,
+                                          size: 64,
+                                          color: Colors.grey,
+                                        ),
+                                        SizedBox(height: 16),
+                                        Text('Failed to load image'),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            );
+                          } else {
+                            return Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.image_not_supported,
+                                    size: 64,
+                                    color: Colors.grey,
+                                  ),
+                                  SizedBox(height: 16),
+                                  Text('Image not available'),
+                                ],
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+
+                  // Action Buttons
+                  Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      border: Border(top: BorderSide(color: Colors.grey[300]!)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ElevatedButton.icon(
+                          icon: Icon(Icons.open_in_new),
+                          label: Text('Open in New Tab'),
+                          onPressed:
+                              () => signaling.viewImageInNewTab(documentId),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          icon: Icon(Icons.download),
+                          label: Text('Download'),
+                          onPressed: () async {
+                            await signaling.downloadRoomImage(documentId);
+                            _showSnackBar("Image downloaded!");
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Show loading screen during initialization
@@ -201,9 +345,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     _cameraOpened
                         ? () async {
                           try {
-                            await signaling.closeUserMedia(
-                              _localRenderer,
-                            );
+                            await signaling.closeUserMedia(_localRenderer);
                             setState(() {
                               _cameraOpened = !_cameraOpened;
                             });
@@ -323,6 +465,265 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
                 child: Text("Join Room"),
               ),
+
+              ElevatedButton(
+                onPressed:
+                    (roomId == null)
+                        ? null
+                        : () async {
+                          try {
+                            final images = await signaling.getRoomImages();
+
+                            showDialog(
+                              context: context,
+                              builder:
+                                  (context) => Dialog(
+                                    child: Container(
+                                      width:
+                                          MediaQuery.of(context).size.width *
+                                          0.8,
+                                      height:
+                                          MediaQuery.of(context).size.height *
+                                          0.8,
+                                      padding: EdgeInsets.all(16),
+                                      child: Column(
+                                        children: [
+                                          // Header
+                                          Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Text(
+                                                'Room $roomId Images (${images.length})',
+                                                style: TextStyle(
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              IconButton(
+                                                icon: Icon(Icons.close),
+                                                onPressed:
+                                                    () =>
+                                                        Navigator.of(
+                                                          context,
+                                                        ).pop(),
+                                              ),
+                                            ],
+                                          ),
+                                          Divider(),
+
+                                          // Images List
+                                          Expanded(
+                                            child:
+                                                images.isEmpty
+                                                    ? Center(
+                                                      child: Column(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .center,
+                                                        children: [
+                                                          Icon(
+                                                            Icons
+                                                                .image_not_supported,
+                                                            size: 64,
+                                                            color: Colors.grey,
+                                                          ),
+                                                          SizedBox(height: 16),
+                                                          Text(
+                                                            'No images captured in this room yet',
+                                                          ),
+                                                          SizedBox(height: 8),
+                                                          Text(
+                                                            'Take some pictures during your video call!',
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    )
+                                                    : ListView.builder(
+                                                      itemCount: images.length,
+                                                      itemBuilder: (
+                                                        context,
+                                                        index,
+                                                      ) {
+                                                        final image =
+                                                            images[index];
+                                                        final documentId =
+                                                            image['document_id']
+                                                                as String;
+                                                        final imageId =
+                                                            image['image_id']
+                                                                as String;
+                                                        final timestamp =
+                                                            image['local_timestamp']
+                                                                as int;
+                                                        final fileSize =
+                                                            image['file_size']
+                                                                as int;
+                                                        final capturedBy =
+                                                            image['captured_by']
+                                                                as String? ??
+                                                            'unknown';
+                                                        final date =
+                                                            DateTime.fromMillisecondsSinceEpoch(
+                                                              timestamp,
+                                                            );
+
+                                                        return Card(
+                                                          margin:
+                                                              EdgeInsets.symmetric(
+                                                                vertical: 4,
+                                                              ),
+                                                          child: ListTile(
+                                                            leading: CircleAvatar(
+                                                              backgroundColor:
+                                                                  Colors.blue,
+                                                              child: Icon(
+                                                                Icons.image,
+                                                                color:
+                                                                    Colors
+                                                                        .white,
+                                                              ),
+                                                            ),
+                                                            title: Text(
+                                                              imageId,
+                                                              style: TextStyle(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                              ),
+                                                            ),
+                                                            subtitle: Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                Text(
+                                                                  '📅 ${date.toString().substring(0, 19)}',
+                                                                ),
+                                                                Text(
+                                                                  '💾 ${(fileSize / 1024).toStringAsFixed(1)} KB',
+                                                                ),
+                                                                Text(
+                                                                  '👤 Captured by: $capturedBy',
+                                                                ),
+                                                                Text(
+                                                                  '🏠 Room: $roomId',
+                                                                ),
+                                                              ],
+                                                            ),
+                                                            trailing: Row(
+                                                              mainAxisSize:
+                                                                  MainAxisSize
+                                                                      .min,
+                                                              children: [
+                                                                IconButton(
+                                                                  icon: Icon(
+                                                                    Icons
+                                                                        .visibility,
+                                                                    color:
+                                                                        Colors
+                                                                            .green,
+                                                                  ),
+                                                                  onPressed: () async {
+                                                                    await signaling
+                                                                        .viewImageInNewTab(
+                                                                          documentId,
+                                                                        );
+                                                                  },
+                                                                  tooltip:
+                                                                      'View in New Tab',
+                                                                ),
+                                                                IconButton(
+                                                                  icon: Icon(
+                                                                    Icons
+                                                                        .download,
+                                                                    color:
+                                                                        Colors
+                                                                            .blue,
+                                                                  ),
+                                                                  onPressed: () async {
+                                                                    await signaling
+                                                                        .downloadRoomImage(
+                                                                          documentId,
+                                                                        );
+                                                                    _showSnackBar(
+                                                                      "Image downloaded!",
+                                                                    );
+                                                                  },
+                                                                  tooltip:
+                                                                      'Download',
+                                                                ),
+                                                                IconButton(
+                                                                  icon: Icon(
+                                                                    Icons
+                                                                        .fullscreen,
+                                                                    color:
+                                                                        Colors
+                                                                            .purple,
+                                                                  ),
+                                                                  onPressed: () {
+                                                                    _showImagePreview(
+                                                                      context,
+                                                                      documentId,
+                                                                      imageId,
+                                                                    );
+                                                                  },
+                                                                  tooltip:
+                                                                      'Preview',
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                          ),
+
+                                          // Footer Actions
+                                          if (images.isNotEmpty)
+                                            Padding(
+                                              padding: EdgeInsets.only(top: 16),
+                                              child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  ElevatedButton.icon(
+                                                    icon: Icon(Icons.download),
+                                                    label: Text('Download All'),
+                                                    onPressed: () async {
+                                                      for (final image
+                                                          in images) {
+                                                        await signaling
+                                                            .downloadRoomImage(
+                                                              image['document_id'],
+                                                            );
+                                                      }
+                                                      _showSnackBar(
+                                                        "All images downloaded!",
+                                                      );
+                                                    },
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                            );
+                          } catch (e) {
+                            _showSnackBar(
+                              "Error loading room images: ${e.toString()}",
+                            );
+                          }
+                        },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:
+                      (roomId == null) ? Colors.grey : Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+                child: Text("View Room Images"),
+              ),
               ElevatedButton(
                 onPressed: () async {
                   try {
@@ -344,6 +745,23 @@ class _MyHomePageState extends State<MyHomePage> {
                   foregroundColor: Colors.white,
                 ),
                 child: Text("Hang Up"),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  try {
+                    await signaling.takeCustomerPicture();
+                    print('📷 Customer Picture Taken');
+                    _showSnackBar("Request Sent");
+                  } catch (e) {
+                    print("Error requesting: $e");
+                    _showSnackBar("Error requesting: ${e.toString()}");
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+                child: Text("Take Customer Picture"),
               ),
             ],
           ),
