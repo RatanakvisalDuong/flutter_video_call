@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 import 'dart:html' as html;
 
@@ -19,6 +21,8 @@ class Signaling {
 
   bool _isRemoteDescriptionSet = false;
   final List<RTCIceCandidate> _pendingCandidates = [];
+
+  MediaRecorder? _mediaRecorder;
 
   // ** Open user media (camera + mic) and bind to localRenderer
   Future<void> openUserMedia(
@@ -58,8 +62,8 @@ class Signaling {
     // Create PeerConnection with proper configuration
     peerConnection = await createPeerConnection({
       'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'},
         {'urls': 'stun:stun1.l.google.com:19302'},
+        {'urls': 'stun:stun.l.google.com:19302'},
       ],
       'iceCandidatePoolSize': 10,
     });
@@ -321,7 +325,9 @@ class Signaling {
 
       if (_currentRoomId == null) {
         print('❌ No room ID available');
-        throw Exception('No room ID available - must be in a call to capture images');
+        throw Exception(
+          'No room ID available - must be in a call to capture images',
+        );
       }
 
       final videoTrack = _remoteRenderer!.srcObject!.getVideoTracks().first;
@@ -330,13 +336,13 @@ class Signaling {
 
       // Convert to base64 for Firestore storage
       final base64String = base64Encode(imgBytes);
-      
+
       // Generate unique image ID with timestamp
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final imageId = 'customer_${timestamp}';
-      
+
       print('📸 Captured ${imgBytes.length} bytes for room $_currentRoomId');
-      
+
       // Store in room's images subcollection
       final roomRef = _firestore.collection('rooms').doc(_currentRoomId);
       final imageDocRef = await roomRef.collection('images').add({
@@ -350,12 +356,11 @@ class Signaling {
         'room_id': _currentRoomId,
         'captured_by': 'local_user', // You can customize this
       });
-      
+
       print('✅ Customer picture saved to room $_currentRoomId');
       print('📍 Image Document ID: ${imageDocRef.id}');
-      
+
       return imageDocRef.id; // Return image document ID
-      
     } catch (e) {
       print('❌ Error capturing and storing picture: $e');
       rethrow;
@@ -371,18 +376,17 @@ class Signaling {
 
       final roomRef = _firestore.collection('rooms').doc(_currentRoomId);
       final doc = await roomRef.collection('images').doc(imageDocumentId).get();
-      
+
       if (!doc.exists) {
         print('❌ Image document not found: $imageDocumentId');
         return null;
       }
-      
+
       final data = doc.data() as Map<String, dynamic>;
       final base64String = data['image_data'] as String;
       final contentType = data['content_type'] as String? ?? 'image/png';
-      
+
       return 'data:$contentType;base64,$base64String';
-      
     } catch (e) {
       print('❌ Error retrieving image: $e');
       return null;
@@ -390,22 +394,24 @@ class Signaling {
   }
 
   /// Get image for any room (static method)
-  Future<String?> getImageDataUrlForRoom(String roomId, String imageDocumentId) async {
+  Future<String?> getImageDataUrlForRoom(
+    String roomId,
+    String imageDocumentId,
+  ) async {
     try {
       final roomRef = _firestore.collection('rooms').doc(roomId);
       final doc = await roomRef.collection('images').doc(imageDocumentId).get();
-      
+
       if (!doc.exists) {
         print('❌ Image document not found: $imageDocumentId in room $roomId');
         return null;
       }
-      
+
       final data = doc.data() as Map<String, dynamic>;
       final base64String = data['image_data'] as String;
       final contentType = data['content_type'] as String? ?? 'image/png';
-      
+
       return 'data:$contentType;base64,$base64String';
-      
     } catch (e) {
       print('❌ Error retrieving image: $e');
       return null;
@@ -435,30 +441,31 @@ class Signaling {
         print('❌ Could not get image data');
         return;
       }
-      
+
       if (_currentRoomId == null) return;
-      
+
       final roomRef = _firestore.collection('rooms').doc(_currentRoomId);
       final doc = await roomRef.collection('images').doc(imageDocumentId).get();
       final data = doc.data() as Map<String, dynamic>;
       final imageId = data['image_id'] as String;
       final timestamp = data['local_timestamp'] as int;
       final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
-      
+
       // Create descriptive filename
-      final fileName = '${imageId}_${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}_room-${_currentRoomId}.png';
-      
+      final fileName =
+          '${imageId}_${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}_room-${_currentRoomId}.png';
+
       // Create download link
-      final anchor = html.AnchorElement(href: dataUrl)
-        ..setAttribute('download', fileName)
-        ..style.display = 'none';
-      
+      final anchor =
+          html.AnchorElement(href: dataUrl)
+            ..setAttribute('download', fileName)
+            ..style.display = 'none';
+
       html.document.body?.children.add(anchor);
       anchor.click();
       html.document.body?.children.remove(anchor);
-      
+
       print('✅ Image downloaded: $fileName');
-      
     } catch (e) {
       print('❌ Error downloading image: $e');
     }
@@ -473,22 +480,125 @@ class Signaling {
       }
 
       final roomRef = _firestore.collection('rooms').doc(_currentRoomId);
-      final querySnapshot = await roomRef
-          .collection('images')
-          .where('image_data', isNotEqualTo: null) // Only get actual images
-          .orderBy('captured_at', descending: true)
-          .get();
-      
-      return querySnapshot.docs.map((doc) => {
-        'document_id': doc.id,
-        'room_id': _currentRoomId,
-        ...doc.data(),
-        // Don't include image_data in list to save bandwidth
-      }..remove('image_data')).toList();
-      
+      final querySnapshot =
+          await roomRef
+              .collection('images')
+              .where('image_data', isNotEqualTo: null) // Only get actual images
+              .orderBy('captured_at', descending: true)
+              .get();
+
+      return querySnapshot.docs
+          .map(
+            (doc) => {
+              'document_id': doc.id,
+              'room_id': _currentRoomId,
+              ...doc.data(),
+              // Don't include image_data in list to save bandwidth
+            }..remove('image_data'),
+          )
+          .toList();
     } catch (e) {
       print('❌ Error fetching room images: $e');
       return [];
+    }
+  }
+
+  Future<void> startRecordStream(RTCVideoRenderer remoteRenderer) async {
+    MediaStream? remoteStream = remoteRenderer.srcObject;
+    if (remoteStream == null) {
+      print('❌ No remote stream to record');
+      return;
+    }
+    _mediaRecorder = MediaRecorder();
+    _mediaRecorder!.startWeb(remoteStream, mimeType: 'video/webm');
+    print('⏺️ Recording started');
+  }
+
+  Future<String?> stopRecordStreamAndSaveToFirebase() async {
+    if (_mediaRecorder == null) {
+      print('❌ No recording in progress');
+      return null;
+    }
+    try {
+      final blobUrl = await _mediaRecorder!.stop();
+      print('⏹️ Recording stopped, blob URL: $blobUrl');
+
+      // Fetch the actual blob from the URL
+      final response = await html.window.fetch(blobUrl);
+      final blob = await response.blob();
+
+      print('📹 Blob size: ${blob.size} bytes');
+
+      // Read blob as bytes for Firebase Storage
+      final reader = html.FileReader();
+      final completer = Completer<Uint8List>();
+      reader.readAsArrayBuffer(blob);
+      reader.onLoadEnd.listen((event) {
+        completer.complete(reader.result as Uint8List);
+      });
+      final bytes = await completer.future;
+
+      if (_currentRoomId == null) {
+        print('❌ No room ID available');
+        return null;
+      }
+
+      // Generate unique video ID with timestamp
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final videoId = 'video_${timestamp}';
+      final fileName = '$videoId.webm';
+
+      // Upload to Firebase Storage
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('rooms')
+          .child(_currentRoomId!)
+          .child('videos')
+          .child(fileName);
+
+      print('📤 Uploading video to Firebase Storage...');
+      final uploadTask = storageRef.putData(
+        bytes,
+        SettableMetadata(
+          contentType: 'video/webm',
+          customMetadata: {
+            'room_id': _currentRoomId!,
+            'recorded_by': 'local_user',
+            'local_timestamp': timestamp.toString(),
+          },
+        ),
+      );
+
+      final snapshot = await uploadTask;
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+
+      print('✅ Video uploaded to Firebase Storage');
+      print('🔗 Download URL: $downloadUrl');
+
+      // Save metadata to Firestore (optional - just metadata, not the video data)
+      final roomRef = _firestore.collection('rooms').doc(_currentRoomId);
+      final videoDocRef = await roomRef.collection('videos').add({
+        'video_id': videoId,
+        'file_name': fileName,
+        'download_url': downloadUrl,
+        'storage_path': 'rooms/$_currentRoomId/videos/$fileName',
+        'content_type': 'video/webm',
+        'file_size': bytes.length,
+        'recorded_at': FieldValue.serverTimestamp(),
+        'local_timestamp': timestamp,
+        'room_id': _currentRoomId,
+        'recorded_by': 'local_user',
+      });
+
+      // Clean up the blob URL
+      html.Url.revokeObjectUrl(blobUrl);
+
+      print('✅ Video metadata saved to Firestore');
+      print('📍 Video Document ID: ${videoDocRef.id}');
+      return videoDocRef.id;
+    } catch (e) {
+      print('❌ Error saving video: $e');
+      return null;
     }
   }
 

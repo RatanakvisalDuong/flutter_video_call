@@ -62,7 +62,10 @@ class _MyHomePageState extends State<MyHomePage> {
   TextEditingController textEditingController = TextEditingController(text: '');
   bool _isInitializing = true;
   String _initializationError = '';
+  
   bool _cameraOpened = false;
+
+  bool isTakingVideo = false;
 
   @override
   void initState() {
@@ -144,7 +147,7 @@ class _MyHomePageState extends State<MyHomePage> {
       context: context,
       builder:
           (context) => Dialog(
-            child: Container(
+            child: SizedBox(
               width: MediaQuery.of(context).size.width * 0.7,
               height: MediaQuery.of(context).size.height * 0.7,
               child: Column(
@@ -279,6 +282,72 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  Widget _failView() {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error, size: 64, color: Colors.red),
+            SizedBox(height: 16),
+            Text('Initialization Failed'),
+            SizedBox(height: 8),
+            Text(_initializationError),
+            SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  _isInitializing = true;
+                  _initializationError = '';
+                });
+                _initializeApp();
+              },
+              child: Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _webView() {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: _buildVideoContainer(_remoteRenderer, "Your Friend", false),
+        ),
+        Positioned(
+          bottom: 20,
+          right: 50,
+          child: SizedBox(
+            height: 200,
+            width: 300,
+            child: _buildVideoContainer(_localRenderer, "You", true),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _mobileView() {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: _buildVideoContainer(_remoteRenderer, "Your Friend", false),
+        ),
+        Positioned(
+          bottom: 20,
+          right: 20,
+          child: SizedBox(
+            height: 150,
+            width: 100,
+            child: _buildVideoContainer(_localRenderer, "You", true),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Show loading screen during initialization
@@ -299,31 +368,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
     // Show error screen if initialization failed
     if (_initializationError.isNotEmpty) {
-      return Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error, size: 64, color: Colors.red),
-              SizedBox(height: 16),
-              Text('Initialization Failed'),
-              SizedBox(height: 8),
-              Text(_initializationError),
-              SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    _isInitializing = true;
-                    _initializationError = '';
-                  });
-                  _initializeApp();
-                },
-                child: Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      );
+      return _failView();
     }
 
     return Scaffold(
@@ -763,6 +808,26 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
                 child: Text("Take Customer Picture"),
               ),
+              ElevatedButton(
+                onPressed: () async {
+                  if(!isTakingVideo){
+                    print("🎥 Starting video capture");
+                    signaling.startRecordStream(_remoteRenderer);
+                  }
+                  else{
+                    print("🎥 Stopping video capture");
+                    signaling.stopRecordStreamAndSaveToFirebase();
+                  }
+                  setState(() {
+                    isTakingVideo = !isTakingVideo;
+                  });
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+                child: Text(!isTakingVideo ? "Capture Video" : "Stop Video"),
+              ),
             ],
           ),
           SizedBox(height: 8),
@@ -771,54 +836,8 @@ class _MyHomePageState extends State<MyHomePage> {
               padding: const EdgeInsets.all(8.0),
               child:
                   kIsWeb || MediaQuery.of(context).size.width > 600
-                      ? Stack(
-                        children: [
-                          Positioned.fill(
-                            child: _buildVideoContainer(
-                              _remoteRenderer,
-                              "Your Friend",
-                              false,
-                            ),
-                          ),
-                          Positioned(
-                            bottom: 20,
-                            right: 50,
-                            child: SizedBox(
-                              height: 200,
-                              width: 300,
-                              child: _buildVideoContainer(
-                                _localRenderer,
-                                "You",
-                                true,
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
-                      : Stack(
-                        children: [
-                          Positioned.fill(
-                            child: _buildVideoContainer(
-                              _remoteRenderer,
-                              "Your Friend",
-                              false,
-                            ),
-                          ),
-                          Positioned(
-                            bottom: 20,
-                            right: 20,
-                            child: SizedBox(
-                              height: 150,
-                              width: 100,
-                              child: _buildVideoContainer(
-                                _localRenderer,
-                                "You",
-                                true,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                      ? _webView()
+                      : _mobileView(),
             ),
           ),
           Padding(
